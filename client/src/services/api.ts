@@ -259,3 +259,24 @@ export const fetchTrades = async (symbol?: string): Promise<Trade[]> => {
   return response.data;
 };
 
+// Analyze tweets sentiment
+export interface AnalyzeTweetsRequest {
+  tweet_ids: number[];
+}
+
+export interface AnalyzeTweetsResponse {
+  success: boolean;
+  message: string;
+  analyzed_count: number;
+  tweets: Tweet[];
+}
+
+export const analyzeTweets = async (
+  tweetIds: number[]
+): Promise<AnalyzeTweetsResponse> => {
+  const response = await api.post('/api/v1/tweets/analyze', {
+    tweet_ids: tweetIds,
+  });
+  return response.data;
+};
+

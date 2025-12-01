@@ -13,6 +13,7 @@ export default function TweetList({ onTweetsLoaded }: TweetListProps) {
   const [error, setError] = useState<string | null>(null);
   const [statusMessages, setStatusMessages] = useState<string[]>([]);
   const [currentStep, setCurrentStep] = useState<string>('');
+  const [tweetCount, setTweetCount] = useState<number>(10);
 
   const handleFetchTweets = async () => {
     setLoading(true);
@@ -30,7 +31,7 @@ export default function TweetList({ onTweetsLoaded }: TweetListProps) {
         setCurrentStep(`Fetching tweets from @${username}...`);
         
         try {
-          const response = await fetchTweetsFromTwitter(username, 5);
+          const response = await fetchTweetsFromTwitter(username, tweetCount);
           
           // Update status messages
           allStatusMessages.push(...response.status_messages);
@@ -112,36 +113,41 @@ export default function TweetList({ onTweetsLoaded }: TweetListProps) {
     }
   };
 
-  const getSentimentColor = (label: string | null) => {
-    if (!label) return 'bg-dark-border text-dark-textSecondary';
-    switch (label.toLowerCase()) {
-      case 'positive':
-        return 'bg-green-500/20 text-green-400 border border-green-500/30';
-      case 'negative':
-        return 'bg-red-500/20 text-red-400 border border-red-500/30';
-      default:
-        return 'bg-dark-border text-dark-textSecondary';
-    }
-  };
-
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-dark-text">Latest Tweets</h2>
-        <button
-          onClick={handleFetchTweets}
-          disabled={loading}
-          className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-        >
-          {loading ? (
-            <span className="flex items-center gap-2">
-              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-              Fetching...
-            </span>
-          ) : (
-            'Fetch Tweets'
-          )}
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label htmlFor="tweet-count" className="text-sm text-dark-textSecondary">
+              Number of tweets:
+            </label>
+            <input
+              id="tweet-count"
+              type="number"
+              min="1"
+              max="100"
+              value={tweetCount}
+              onChange={(e) => setTweetCount(Math.max(1, Math.min(100, parseInt(e.target.value) || 10)))}
+              disabled={loading}
+              className="w-20 px-3 py-1.5 bg-dark-surface border border-dark-border rounded-lg text-dark-text text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+          </div>
+          <button
+            onClick={handleFetchTweets}
+            disabled={loading}
+            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+          >
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                Fetching...
+              </span>
+            ) : (
+              'Fetch Tweets'
+            )}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -198,28 +204,13 @@ export default function TweetList({ onTweetsLoaded }: TweetListProps) {
                 </div>
                 <div>
                   <span className="font-semibold text-dark-text">@{tweet.author_username}</span>
-                  {tweet.sentiment_label && (
-                    <span
-                      className={`ml-3 text-xs px-2.5 py-1 rounded-full font-medium ${getSentimentColor(
-                        tweet.sentiment_label
-                      )}`}
-                    >
-                      {tweet.sentiment_label}
-                    </span>
-                  )}
                 </div>
               </div>
               <span className="text-sm text-dark-textSecondary">
                 {new Date(tweet.created_at).toLocaleDateString()}
               </span>
             </div>
-            <p className="text-dark-text mb-3 leading-relaxed">{tweet.content}</p>
-            {tweet.sentiment_score !== null && (
-              <div className="flex items-center gap-2 text-sm text-dark-textSecondary">
-                <span>Sentiment Score:</span>
-                <span className="font-semibold text-primary-400">{tweet.sentiment_score.toFixed(4)}</span>
-              </div>
-            )}
+            <p className="text-dark-text leading-relaxed">{tweet.content}</p>
           </div>
         ))}
       </div>

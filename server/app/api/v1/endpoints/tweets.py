@@ -13,12 +13,14 @@ from app.db.database import get_db
 from app.db.models import Tweet
 from app.services.twitter_service import TwitterService
 from app.services.reddit_service import RedditService
+from app.services.sentiment_service import SentimentService
 
 router = APIRouter()
 
 # Global service instances (initialized on first use)
 _twitter_service: Optional[TwitterService] = None
 _reddit_service: Optional[RedditService] = None
+_sentiment_service: Optional[SentimentService] = None
 
 
 def get_twitter_service() -> TwitterService:
@@ -35,6 +37,14 @@ def get_reddit_service() -> RedditService:
     if _reddit_service is None:
         _reddit_service = RedditService()
     return _reddit_service
+
+
+def get_sentiment_service() -> SentimentService:
+    """Get or create SentimentService instance"""
+    global _sentiment_service
+    if _sentiment_service is None:
+        _sentiment_service = SentimentService()
+    return _sentiment_service
 
 
 class TweetResponse(BaseModel):
@@ -182,7 +192,7 @@ async def fetch_tweets_from_twitter(
                                         created_at_db=existing_tweet.created_at_db,
                                     ))
                                 else:
-                                    # Save new post (this includes sentiment analysis)
+                                    # Save new post (sentiment analysis will be done later via analyze endpoint)
                                     tweet = await twitter_service.save_tweet(db, post_data)
                                     tweets_saved += 1
                                     tweets_fetched += 1
@@ -311,8 +321,8 @@ async def fetch_tweets_from_twitter(
         
         status_messages.append(f"Successfully fetched {tweets_fetched} tweet(s) from Twitter")
         
-        # Step 4: Save tweets to database with sentiment analysis
-        status_messages.append("Saving tweets to database and analyzing sentiment...")
+        # Step 4: Save tweets to database
+        status_messages.append("Saving tweets to database...")
         
         for idx, tweet_data in enumerate(tweet_data_list, 1):
             try:
@@ -339,12 +349,10 @@ async def fetch_tweets_from_twitter(
                         created_at_db=existing_tweet.created_at_db,
                     ))
                 else:
-                    # Save new tweet (this includes sentiment analysis)
+                    # Save new tweet (sentiment analysis will be done later via analyze endpoint)
                     tweet = await twitter_service.save_tweet(db, tweet_data)
                     tweets_saved += 1
-                    status_messages.append(
-                        f"Tweet {idx} saved with sentiment: {tweet.sentiment_label or 'neutral'}"
-                    )
+                    status_messages.append(f"Tweet {idx} saved successfully")
                     saved_tweets.append(TweetResponse(
                         id=tweet.id,
                         tweet_id=tweet.tweet_id,
@@ -379,6 +387,80 @@ async def fetch_tweets_from_twitter(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch tweets: {str(e)}"
+        )
+
+
+class AnalyzeTweetsRequest(BaseModel):
+    """Request model for analyzing tweets"""
+    tweet_ids: List[int]
+
+
+class AnalyzeTweetsResponse(BaseModel):
+    """Response model for analyzing tweets"""
+    success: bool
+    message: str
+    analyzed_count: int
+    tweets: List[TweetResponse]
+
+
+@router.post("/analyze", response_model=AnalyzeTweetsResponse)
+async def analyze_tweets(
+    request: AnalyzeTweetsRequest,
+    db: AsyncSession = Depends(get_db),
+    sentiment_service: SentimentService = Depends(get_sentiment_service),
+):
+    """
+    Analyze sentiment for specified tweets.
+    Updates tweets in the database with sentiment scores and labels.
+    """
+    analyzed_count = 0
+    updated_tweets = []
+    
+    try:
+        for tweet_id in request.tweet_ids:
+            # Get tweet from database
+            result = await db.execute(
+                select(Tweet).where(Tweet.id == tweet_id)
+            )
+            tweet = result.scalar_one_or_none()
+            
+            if not tweet:
+                continue
+            
+            # Analyze sentiment
+            sentiment = sentiment_service.analyze(tweet.content)
+            
+            # Update tweet with sentiment analysis
+            tweet.sentiment_score = sentiment["score"]
+            tweet.sentiment_label = sentiment["label"]
+            
+            await db.commit()
+            await db.refresh(tweet)
+            
+            analyzed_count += 1
+            updated_tweets.append(TweetResponse(
+                id=tweet.id,
+                tweet_id=tweet.tweet_id,
+                author_username=tweet.author_username,
+                content=tweet.content,
+                created_at=tweet.created_at,
+                sentiment_score=tweet.sentiment_score,
+                sentiment_label=tweet.sentiment_label,
+                processed=tweet.processed,
+                created_at_db=tweet.created_at_db,
+            ))
+        
+        return AnalyzeTweetsResponse(
+            success=True,
+            message=f"Successfully analyzed {analyzed_count} tweet(s)",
+            analyzed_count=analyzed_count,
+            tweets=updated_tweets,
+        )
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to analyze tweets: {str(e)}"
         )
 
 

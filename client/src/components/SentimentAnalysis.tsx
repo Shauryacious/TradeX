@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { analyzeTweets } from '@services/api';
 import type { Tweet } from '@services/api';
 
 interface AnalysisResults {
@@ -21,17 +22,57 @@ interface SentimentAnalysisProps {
 
 export default function SentimentAnalysis({ tweets, onAnalysisComplete }: SentimentAnalysisProps) {
   const [analysisResults, setAnalysisResults] = useState<AnalysisResults | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
 
-  const handleAnalyzeSentiment = () => {
+  const handleAnalyzeSentiment = async () => {
     if (tweets.length === 0) {
       alert('Please fetch tweets first');
       return;
     }
 
-    // Analyze sentiment from fetched tweets
-    const analyzedTweets = tweets.filter((tweet) => tweet.sentiment_score !== null);
+    setAnalyzing(true);
     
-    if (analyzedTweets.length === 0) {
+    try {
+      // Get tweet IDs that need analysis (those without sentiment scores)
+      const tweetsToAnalyze = tweets.filter((tweet) => tweet.sentiment_score === null);
+      
+      if (tweetsToAnalyze.length === 0) {
+        // All tweets already analyzed, just compute results
+        computeResults(tweets);
+        setAnalyzing(false);
+        return;
+      }
+
+      // Call the analyze endpoint
+      const tweetIds = tweetsToAnalyze.map((tweet) => tweet.id);
+      const response = await analyzeTweets(tweetIds);
+      
+      if (!response.success) {
+        alert(`Failed to analyze tweets: ${response.message}`);
+        setAnalyzing(false);
+        return;
+      }
+
+      // Update tweets with analyzed data
+      const updatedTweets = tweets.map((tweet) => {
+        const analyzedTweet = response.tweets.find((at) => at.id === tweet.id);
+        return analyzedTweet || tweet;
+      });
+
+      computeResults(updatedTweets);
+    } catch (error) {
+      console.error('Error analyzing tweets:', error);
+      alert('Failed to analyze tweets. Please try again.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const computeResults = (tweetsToAnalyze: Tweet[]) => {
+    // Filter to only tweets with sentiment analysis
+    const tweetsWithSentiment = tweetsToAnalyze.filter((tweet) => tweet.sentiment_score !== null);
+    
+    if (tweetsWithSentiment.length === 0) {
       alert('No tweets with sentiment analysis found');
       return;
     }
@@ -43,25 +84,23 @@ export default function SentimentAnalysis({ tweets, onAnalysisComplete }: Sentim
     };
 
     let totalScore = 0;
-    const sentimentBreakdown: { [key: string]: number[] } = {
-      elonmusk: [],
-      Tesla: [],
-    };
+    const sentimentBreakdown: { [key: string]: number[] } = {};
 
-    analyzedTweets.forEach((tweet) => {
+    tweetsWithSentiment.forEach((tweet) => {
       const label = tweet.sentiment_label?.toLowerCase() || 'neutral';
       if (label in sentimentCounts) {
         sentimentCounts[label as keyof typeof sentimentCounts]++;
       }
       if (tweet.sentiment_score !== null) {
         totalScore += tweet.sentiment_score;
-        if (tweet.author_username in sentimentBreakdown) {
-          sentimentBreakdown[tweet.author_username].push(tweet.sentiment_score);
+        if (!(tweet.author_username in sentimentBreakdown)) {
+          sentimentBreakdown[tweet.author_username] = [];
         }
+        sentimentBreakdown[tweet.author_username].push(tweet.sentiment_score);
       }
     });
 
-    const averageScore = totalScore / analyzedTweets.length;
+    const averageScore = totalScore / tweetsWithSentiment.length;
     const overallSentiment =
       averageScore > 0.3 ? 'positive' : averageScore < -0.3 ? 'negative' : 'neutral';
 
@@ -75,12 +114,12 @@ export default function SentimentAnalysis({ tweets, onAnalysisComplete }: Sentim
     });
 
     const results = {
-      totalTweets: analyzedTweets.length,
+      totalTweets: tweetsWithSentiment.length,
       sentimentCounts,
       averageScore,
       overallSentiment,
       authorAverages,
-      analyzedTweets,
+      analyzedTweets: tweetsWithSentiment,
     };
     
     setAnalysisResults(results);
@@ -104,16 +143,29 @@ export default function SentimentAnalysis({ tweets, onAnalysisComplete }: Sentim
         <h2 className="text-2xl font-bold text-dark-text">Sentiment Analysis</h2>
         <button
           onClick={handleAnalyzeSentiment}
-          disabled={tweets.length === 0}
+          disabled={tweets.length === 0 || analyzing}
           className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
         >
-          Run Analysis
+          {analyzing ? (
+            <span className="flex items-center gap-2">
+              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              Analyzing...
+            </span>
+          ) : (
+            'Run Analysis'
+          )}
         </button>
       </div>
 
       {tweets.length === 0 && (
         <div className="text-center py-8">
           <p className="text-dark-textSecondary">Please fetch tweets first to run sentiment analysis</p>
+        </div>
+      )}
+
+      {tweets.length > 0 && tweets.every((tweet) => tweet.sentiment_score === null) && !analysisResults && (
+        <div className="text-center py-8">
+          <p className="text-dark-textSecondary">Click "Run Analysis" to analyze sentiment for the fetched tweets</p>
         </div>
       )}
 

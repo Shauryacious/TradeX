@@ -198,7 +198,7 @@ class TwitterService:
             raise TwitterAPIError(f"Failed to fetch tweets: {e}")
     
     async def save_tweet(self, session: AsyncSession, tweet_data: Dict) -> Tweet:
-        """Save tweet to database"""
+        """Save tweet to database without sentiment analysis"""
         try:
             # Check if tweet already exists
             result = await session.execute(
@@ -209,9 +209,6 @@ class TwitterService:
             if existing_tweet:
                 return existing_tweet
             
-            # Analyze sentiment
-            sentiment = self.sentiment_service.analyze(tweet_data["content"])
-            
             # Convert timezone-aware datetime to timezone-naive UTC
             # Twitter API returns timezone-aware datetimes, but database expects timezone-naive
             created_at = tweet_data["created_at"]
@@ -219,14 +216,14 @@ class TwitterService:
                 # Convert to UTC and remove timezone info
                 created_at = created_at.astimezone(timezone.utc).replace(tzinfo=None)
             
-            # Create new tweet
+            # Create new tweet without sentiment analysis
             tweet = Tweet(
                 tweet_id=tweet_data["tweet_id"],
                 author_username=tweet_data["author_username"],
                 content=tweet_data["content"],
                 created_at=created_at,
-                sentiment_score=sentiment["score"],
-                sentiment_label=sentiment["label"],
+                sentiment_score=None,
+                sentiment_label=None,
                 processed=False,
             )
             
@@ -234,7 +231,7 @@ class TwitterService:
             await session.commit()
             await session.refresh(tweet)
             
-            logger.info(f"Saved tweet {tweet_data['tweet_id']} with sentiment {sentiment['label']}")
+            logger.info(f"Saved tweet {tweet_data['tweet_id']} (sentiment analysis will be done later)")
             return tweet
         except Exception as e:
             await session.rollback()
